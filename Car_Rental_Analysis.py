@@ -1,133 +1,179 @@
-!pip install datasets
-!pip install scikit-learn
-!pip install ibm-watson-machine-learning==1.0.312
-import os, getpass
-from pandas import read_csv
-credentials = {
-    "url": "https://us-south.ml.cloud.ibm.com",
-    "apikey": getpass.getpass("Please enter your WML api key (hit enter): ")
-}
-try:
-    project_id = os.environ["PROJECT_ID"]
-except KeyError:
-    project_id = input("Please enter your project_id (hit enter): ")
-project_id
-import os, types
-import pandas as pd
-from ibm_boto3 import client
-from botocore.client import Config
-import ibm_boto3
-
-def _iter_(self): return 0
-cos_client = ibm_boto3.client(service_name='s3',
-    ibm_api_key_id='MFVLlm1YZ4zYK8XVZU4fjZ7gGNQ6d5V1v28MtLy9X90C',
-    ibm_auth_endpoint="https://iam.cloud.ibm.com/oidc/token",
-    config=Config(signature_version='oauth'),
-    endpoint_url='https://s3.private.us-south.cloud-object-storage.appdomain.cloud'
-)
-
-bucket = 'handson-6gvhgxmhg'
-object_key = 'train_data (1).csv'
-body = cos_client.get_object(Bucket=bucket, Key=object_key)['Body']
-
-if not hasattr(body, "_iter_"):
-    body._iter_ = types.MethodType(_iter_, body)
-
-train_data = pd.read_csv(body)
-train_data.head(5)
-import os, types
-import pandas as pd
-from botocore.client import Config
-import ibm_boto3
-
-def _iter_(self): return 0
-cos_client = ibm_boto3.client(service_name='s3',
-    ibm_api_key_id="MFVLlm1YZ4zYK8XVZU4fjZ7gGNQ6d5V1v28MtLy9X90C",
-    ibm_auth_endpoint="https://iam.cloud.ibm.com/oidc/token",
-    config=Config(signature_version='oauth'),
-    endpoint_url="https://s3.private.us-south.cloud-object-storage.appdomain.cloud"
-)
-
-bucket = 'handson-6gvhgxmhg'
-object_key = 'test_data (1).csv'
-body = cos_client.get_object(Bucket=bucket, Key=object_key)['Body']
-
-if not hasattr(body, "_iter_"):
-    body._iter_ = types.MethodType(_iter_, body)
-
-test_data = pd.read_csv(body)
-test_data.head(5)
-train_data.shape
-test_data.shape
-from ibm_watson_machine_learning.foundation_models.utils.enums import ModelTypes
-model_id = ModelTypes.FLAN_UL2
-satisfaction_instruction = """
-Was customer satisfied?\n
-comment: I have had a few recent rentals that have taken a very very long time, with no offer of apology.
-In the most recent case, the agent subsequently offered me a car type on
-an upgrade coupon and then told me it was no longer available because it had just be\n
-satisfaction: 0\n\n
 """
-from ibm_watson_machine_learning.metanames import GenTextParamsMetaNames as GenParams
-parameters = {
-    GenParams.MAX_NEW_TOKENS: 10
-}
-from ibm_watson_machine_learning.foundation_models import Model
-model = Model(
-    model_id=model_id,
-    params=parameters,
-    credentials=credentials,
-    project_id=project_id
-)
-import time
-results = []
-comments = list(test_data.Customer_Service)
-satisfaction = list(test_data.Satisfaction.astype(str))
+Car Rental Feedback Analyzer using IBM watsonx.ai (FLAN-UL2)
 
-for input_text in comments:
-    prompt_text = " ".join([satisfaction_instruction, input_text])
-    try:
-        response = model.generate_text(prompt=prompt_text)
-        results.append(response)
-        time.sleep(0.6)  # Add delay to avoid 429 error
-    except Exception as e:
-        print(f"Error for input: {input_text[:30]}... => {e}")
-        results.append("ERROR")
-comments
-satisfaction
-results
-business_area_instruction = """
+For each customer comment the script:
+  1. predicts satisfaction (1 = satisfied, 0 = not satisfied), and
+  2. classifies the business area of the comment.
+
+It uses few-shot prompting of a foundation model (no model training) and
+reports accuracy when ground-truth labels are available.
+
+Credentials are read from environment variables. Never hardcode API keys.
+    WML_API_KEY       watsonx.ai / Watson Machine Learning API key
+    PROJECT_ID        watsonx.ai project id
+    WATSONX_URL       (optional) default https://us-south.ml.cloud.ibm.com
+
+Data (choose one):
+    Local CSV files:  TRAIN_CSV / TEST_CSV  (paths)
+    IBM Cloud Object Storage:  COS_API_KEY, COS_BUCKET, COS_ENDPOINT,
+                               COS_TEST_KEY (and optionally COS_TRAIN_KEY)
+
+The test CSV needs a `Customer_Service` column (comment text) and, for
+evaluation, a `Satisfaction` column (0/1). A business-area label column
+(`Business_Area`) is optional.
+"""
+
+import io
+import os
+import re
+import time
+import getpass
+
+import pandas as pd
+from sklearn.metrics import accuracy_score, classification_report
+
+from ibm_watson_machine_learning.foundation_models import Model
+from ibm_watson_machine_learning.foundation_models.utils.enums import ModelTypes
+from ibm_watson_machine_learning.metanames import GenTextParamsMetaNames as GenParams
+
+REQUEST_DELAY = 0.6  # seconds between requests, avoids rate-limit (429) errors
+
+BUSINESS_AREAS = [
+    "Product: Functioning",
+    "Product: Pricing and Billing",
+    "Service: Accessibility",
+    "Service: Attitude",
+    "Service: Knowledge",
+    "Service: Orders/Contracts",
+]
+
+SATISFACTION_PROMPT = """
+Was customer satisfied?
+
+comment: I have had a few recent rentals that have taken a very very long time, with no offer of apology.
+satisfaction: 0
+
+comment: """
+
+BUSINESS_AREA_PROMPT = """
 Find the business area of the customer e-mail.
 Choose business area from the following list:
 'Product: Functioning', 'Product: Pricing and Billing', 'Service: Accessibility',
 'Service: Attitude', 'Service: Knowledge', 'Service: Orders/Contracts'.
 
 comment: I do not understand why I have to pay additional fee if vehicle is returned without a full tank.
-business area: 'Product: Pricing and Billing'\n\n
-"""
-from ibm_watson_machine_learning.metanames import GenTextParamsMetaNames as GenParams
+business area: 'Product: Pricing and Billing'
 
-parameters = {
-    GenParams.MAX_NEW_TOKENS: 15
-}
-from ibm_watson_machine_learning.foundation_models import Model
+comment: """
 
-model = Model(
-    model_id=model_id,
-    params=parameters,
-    credentials=credentials,
-    project_id=project_id
-)
-import time
-results = []
-for input_text in comments:
-    try:
-        results.append(model.generate_text(prompt=" ".join([business_area_instruction, input_text])))
-        time.sleep(0.6)  # wait to avoid hitting 2 req/sec limit
-    except Exception as e:
-        print("Error:", e)
-        results.append("ERROR")
 
-comments
-area
-results
+# ---------------------------------------------------------------- data loading
+def _read_cos_csv(key: str) -> pd.DataFrame:
+    import ibm_boto3
+    from botocore.client import Config
+
+    client = ibm_boto3.client(
+        service_name="s3",
+        ibm_api_key_id=os.environ["COS_API_KEY"],
+        ibm_auth_endpoint="https://iam.cloud.ibm.com/oidc/token",
+        config=Config(signature_version="oauth"),
+        endpoint_url=os.environ["COS_ENDPOINT"],
+    )
+    body = client.get_object(Bucket=os.environ["COS_BUCKET"], Key=key)["Body"]
+    return pd.read_csv(io.BytesIO(body.read()))
+
+
+def load_data():
+    """Load train/test data from local CSVs or IBM Cloud Object Storage."""
+    if os.getenv("TEST_CSV"):
+        train = pd.read_csv(os.environ["TRAIN_CSV"]) if os.getenv("TRAIN_CSV") else None
+        test = pd.read_csv(os.environ["TEST_CSV"])
+    else:
+        train = _read_cos_csv(os.environ["COS_TRAIN_KEY"]) if os.getenv("COS_TRAIN_KEY") else None
+        test = _read_cos_csv(os.environ["COS_TEST_KEY"])
+    if train is not None:
+        print("Train shape:", train.shape)
+    print("Test shape:", test.shape)
+    return train, test
+
+
+# ------------------------------------------------------------------- the model
+def build_model(max_new_tokens: int) -> Model:
+    credentials = {
+        "url": os.getenv("WATSONX_URL", "https://us-south.ml.cloud.ibm.com"),
+        "apikey": os.getenv("WML_API_KEY") or getpass.getpass("Enter your IBM WML API key: "),
+    }
+    project_id = os.getenv("PROJECT_ID") or input("Enter your project_id: ")
+    return Model(
+        model_id=ModelTypes.FLAN_UL2,
+        params={GenParams.MAX_NEW_TOKENS: max_new_tokens},
+        credentials=credentials,
+        project_id=project_id,
+    )
+
+
+def generate_all(model: Model, prompt: str, comments):
+    """Send every comment to the model; return a list of raw answers."""
+    answers = []
+    for text in comments:
+        try:
+            answers.append(model.generate_text(prompt=prompt + str(text)).strip())
+        except Exception as exc:  # keep going if one request fails
+            print(f"Error for '{str(text)[:30]}...': {exc}")
+            answers.append("ERROR")
+        time.sleep(REQUEST_DELAY)
+    return answers
+
+
+# ------------------------------------------------------------ output cleaning
+def parse_satisfaction(raw: str) -> str:
+    match = re.search(r"[01]", raw)
+    return match.group(0) if match else "ERROR"
+
+
+def parse_business_area(raw: str) -> str:
+    cleaned = raw.strip().strip("'\"")
+    for area in BUSINESS_AREAS:
+        if area.lower() in cleaned.lower():
+            return area
+    return cleaned or "ERROR"
+
+
+# ------------------------------------------------------------------------ main
+def main():
+    _, test = load_data()
+    comments = list(test["Customer_Service"])
+
+    # 1) Satisfaction prediction
+    sat_model = build_model(max_new_tokens=10)
+    sat_raw = generate_all(sat_model, SATISFACTION_PROMPT, comments)
+    test["Predicted_Satisfaction"] = [parse_satisfaction(r) for r in sat_raw]
+
+    # 2) Business-area classification
+    area_model = build_model(max_new_tokens=15)
+    area_raw = generate_all(area_model, BUSINESS_AREA_PROMPT, comments)
+    test["Predicted_Business_Area"] = [parse_business_area(r) for r in area_raw]
+
+    # Evaluation (only when true labels exist)
+    if "Satisfaction" in test.columns:
+        y_true = test["Satisfaction"].astype(int).astype(str)
+        y_pred = test["Predicted_Satisfaction"]
+        print("\nSatisfaction accuracy:", round(accuracy_score(y_true, y_pred), 4))
+        print(classification_report(y_true, y_pred, zero_division=0))
+
+    for col in ("Business_Area", "business_area", "Business Area"):
+        if col in test.columns:
+            acc = accuracy_score(test[col].astype(str).str.strip(),
+                                 test["Predicted_Business_Area"])
+            print(f"Business-area accuracy: {acc:.4f}")
+            break
+
+    test.to_csv("predictions.csv", index=False)
+    print("\nSaved predictions.csv")
+    print("Sample comment  :", comments[0])
+    print("Predicted satisf:", test["Predicted_Satisfaction"].iloc[0])
+    print("Predicted area  :", test["Predicted_Business_Area"].iloc[0])
+
+
+if __name__ == "__main__":
+    main()
