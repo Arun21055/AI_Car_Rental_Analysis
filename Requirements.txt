@@ -1,0 +1,5 @@
+pandas
+scikit-learn
+ibm-watson-machine-learning==1.0.312
+ibm-cos-sdk
+ 
