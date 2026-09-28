@@ -1,148 +1,78 @@
-# 🚗 Car Rental Feedback Analyzer using IBM watsonx.ai
+# 🚗 Car Rental Feedback Analyzer (IBM watsonx.ai)
 
-This project uses IBM watsonx.ai's FLAN-UL2 foundation model to analyze customer service comments from a car rental company, predict satisfaction levels, and classify business areas.
+Uses IBM watsonx.ai's **FLAN-UL2** foundation model to analyse car rental customer comments:
 
----
+1. **Satisfaction prediction:** was the customer satisfied (1) or not (0)?
+2. **Business-area classification:** which area does the comment concern (pricing, staff attitude, etc.)?
 
-## 📌 Project Overview
+Built during the **IBM SkillsBuild Generative AI internship (May–June 2025)**.
 
-- Perform customer satisfaction prediction.
-- Classify comments into business areas (e.g., Pricing, Attitude).
-- Use IBM foundation models via watsonx and Python SDK.
-- Retrieve data securely from IBM Cloud Object Storage.
+## Approach
 
----
+**Few-shot prompting, with no model training.** Each task has a short instruction plus one worked example, followed by the customer comment. The model completes the answer.
 
-## 🧰 Tools & Technologies Used
+```
+comment ─▶ prompt (instruction + example + comment) ─▶ FLAN-UL2 (watsonx.ai) ─▶ label
+```
 
-- IBM watsonx.ai & Prompt Lab
-- Foundation Model: FLAN-UL2
-- IBM Cloud Object Storage (COS)
-- Python: `pandas`, `ibm_boto3`, `scikit-learn`
-- IBM Watson Machine Learning SDK
+| Task | Output | Max new tokens |
+|---|---|---|
+| Satisfaction | `0` or `1` | 10 |
+| Business area | one of 6 categories | 15 |
 
----
+Business areas: `Product: Functioning`, `Product: Pricing and Billing`, `Service: Accessibility`, `Service: Attitude`, `Service: Knowledge`, `Service: Orders/Contracts`.
 
-## ⚙️ Full Project Code (Step-by-Step in One Block)
+## Tech stack
 
-# 📦 Step 1: Install Required Packages
-!pip install datasets
-!pip install scikit-learn
-!pip install ibm-watson-machine-learning==1.0.312
+Python · pandas · scikit-learn · IBM watsonx.ai (Prompt Lab, FLAN-UL2) · IBM Watson Machine Learning SDK · IBM Cloud Object Storage
 
-# 🔐 Step 2: Authentication and Imports
-import os, getpass, types, time
-import pandas as pd
-from pandas import read_csv
-from botocore.client import Config
-import ibm_boto3
+## What the script does
 
-from ibm_watson_machine_learning.foundation_models.utils.enums import ModelTypes
-from ibm_watson_machine_learning.foundation_models import Model
-from ibm_watson_machine_learning.metanames import GenTextParamsMetaNames as GenParams
+- Loads train/test CSVs from IBM Cloud Object Storage or from local files
+- Sends each comment to FLAN-UL2 with a delay to avoid rate limits, and keeps going if a request fails
+- Cleans the raw model output into a valid label
+- Prints **accuracy and a classification report** when true labels exist
+- Saves everything to `predictions.csv`
 
-# IBM Watson Credentials
-credentials = {
-    "url": "https://us-south.ml.cloud.ibm.com",
-    "apikey": getpass.getpass("Enter your IBM WML API key: ")
-}
+## Setup
 
-try:
-    project_id = os.environ["PROJECT_ID"]
-except KeyError:
-    project_id = input("Enter your project_id: ")
+```bash
+pip install -r requirements.txt
+```
 
-# 🧾 Step 3: Load Data from IBM Cloud Object Storage (COS)
-def _iter_(self): return 0
+Set credentials as environment variables (never commit keys):
 
-cos_client = ibm_boto3.client(service_name='s3',
-    ibm_api_key_id='YOUR_API_KEY',
-    ibm_auth_endpoint="https://iam.cloud.ibm.com/oidc/token",
-    config=Config(signature_version='oauth'),
-    endpoint_url='https://s3.private.us-south.cloud-object-storage.appdomain.cloud'
-)
+```bash
+export WML_API_KEY="your-watsonx-api-key"
+export PROJECT_ID="your-watsonx-project-id"
+```
 
-bucket = 'handson-6gvhgxmhg'
+**Data, option A: local CSV files**
+```bash
+export TEST_CSV=path/to/test_data.csv     # needs a Customer_Service column
+```
 
-# Load training data
-object_key = 'train_data (1).csv'
-body = cos_client.get_object(Bucket=bucket, Key=object_key)['Body']
-if not hasattr(body, "_iter_"): body._iter_ = types.MethodType(_iter_, body)
-train_data = pd.read_csv(body)
+**Data, option B: IBM Cloud Object Storage**
+```bash
+export COS_API_KEY=... COS_BUCKET=... COS_ENDPOINT=... COS_TEST_KEY=test_data.csv
+```
 
-# Load test data
-object_key = 'test_data (1).csv'
-body = cos_client.get_object(Bucket=bucket, Key=object_key)['Body']
-if not hasattr(body, "_iter_"): body._iter_ = types.MethodType(_iter_, body)
-test_data = pd.read_csv(body)
+## Run
 
-print("Train shape:", train_data.shape)
-print("Test shape:", test_data.shape)
+```bash
+python Car_Rental_Analysis.py
+```
 
-# 🧠 Step 4: Load FLAN-UL2 Model for Satisfaction Prediction
-model_id = ModelTypes.FLAN_UL2
-parameters = { GenParams.MAX_NEW_TOKENS: 10 }
+Expected columns: `Customer_Service` (comment text), optional `Satisfaction` (0/1) and `Business_Area` for evaluation.
 
-satisfaction_instruction = """
-Was customer satisfied?
+## Limitations and future work
 
-comment: I have had a few recent rentals that have taken a very very long time, with no offer of apology.
-satisfaction: 0
-"""
+- Few-shot prompting with **one example per task**, so performance depends on prompt wording.
+- The satisfaction prompt shows only a negative example, which may bias predictions. Adding a positive example is a quick improvement.
+- The original dataset is in a private IBM Cloud bucket and is not included.
+- No fine-tuning; a fine-tuned model or more examples could improve accuracy.
+- The `ibm-watson-machine-learning` SDK is being replaced by `ibm-watsonx-ai`, so migrating is future work.
 
-model = Model(
-    model_id=model_id,
-    params=parameters,
-    credentials=credentials,
-    project_id=project_id
-)
+## Author
 
-# Step 5: Predict Customer Satisfaction
-results_satisfaction = []
-comments = list(test_data.Customer_Service)
-satisfaction = list(test_data.Satisfaction.astype(str))
-
-for input_text in comments:
-    prompt_text = " ".join([satisfaction_instruction, input_text])
-    try:
-        response = model.generate_text(prompt=prompt_text)
-        results_satisfaction.append(response)
-        time.sleep(0.6)
-    except Exception as e:
-        print(f"Error: {e}")
-        results_satisfaction.append("ERROR")
-
-# 🏷️ Step 6: Predict Business Area Classification
-business_area_instruction = """
-Find the business area of the customer e-mail.
-Choose from:
-'Product: Functioning', 'Product: Pricing and Billing', 'Service: Accessibility',
-'Service: Attitude', 'Service: Knowledge', 'Service: Orders/Contracts'.
-
-comment: I do not understand why I have to pay additional fee if vehicle is returned without a full tank.
-business area: 'Product: Pricing and Billing'
-"""
-
-parameters = { GenParams.MAX_NEW_TOKENS: 15 }
-
-model = Model(
-    model_id=model_id,
-    params=parameters,
-    credentials=credentials,
-    project_id=project_id
-)
-
-results_business_area = []
-for input_text in comments:
-    try:
-        prompt = " ".join([business_area_instruction, input_text])
-        results_business_area.append(model.generate_text(prompt=prompt))
-        time.sleep(0.6)
-    except Exception as e:
-        print("Error:", e)
-        results_business_area.append("ERROR")
-
-# Optional: View Final Outputs
-print("Sample Comment:", comments[0])
-print("Predicted Satisfaction:", results_satisfaction[0])
-print("Predicted Business Area:", results_business_area[0])
+**P R Arun Kumar**, VIT-AP University
