@@ -1,0 +1,4 @@
+.env
+predictions.csv
+__pycache__/
+*.ipynb_checkpoints/
